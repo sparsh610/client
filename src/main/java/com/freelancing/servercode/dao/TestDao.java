@@ -33,7 +33,7 @@ public class TestDao
         emp.setEmailid(user.getEmailid());
         emp.setEmployeename(user.getEmployeename());
         emp.setPasswd(user.getPasswd());
-        System.out.println("in Dao layer");
+        System.out.println("in Dao layer test");
         Session s = getSession();
         Transaction tx = s.beginTransaction();
         s.save(emp);
