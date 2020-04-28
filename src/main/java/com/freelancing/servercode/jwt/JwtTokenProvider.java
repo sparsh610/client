@@ -1,83 +1,71 @@
 package com.freelancing.servercode.jwt;
 
-import java.util.Arrays;
 import java.util.Date;
-import java.util.List;
-import java.util.stream.Collectors;
 
-import javax.servlet.http.HttpServletRequest;
-
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
-import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
-import org.springframework.security.core.GrantedAuthority;
-import org.springframework.security.core.authority.SimpleGrantedAuthority;
 import org.springframework.stereotype.Component;
 
-import io.jsonwebtoken.Claims;
+import com.freelancing.servercode.model.UserPrinciple;
+
+import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.Jwts;
+import io.jsonwebtoken.MalformedJwtException;
 import io.jsonwebtoken.SignatureAlgorithm;
+import io.jsonwebtoken.SignatureException;
+import io.jsonwebtoken.UnsupportedJwtException;
 
 @Component
 public class JwtTokenProvider
 {
+    private static final Logger logger = LoggerFactory.getLogger(JwtTokenProvider.class);
     @Value("${app.jwt.secret}")
     private String jwtSecret;
-    @Value("${app.jwt.token.prefix}")
-    private String jwtTokenPrefix;
-    @Value("${app.jwt.header.string}")
-    private String jwtHeaderString;
     @Value("${app.jwt.expiration-in-ms}")
-    private String jwtExpirationInMs;
+    private int jwtExpiration;
 
-    public String generateToken(Authentication authentication)
+    public String generateJwtToken(Authentication authentication)
     {
-        String authororities = authentication.getAuthorities().stream()
-            .map(GrantedAuthority::getAuthority).collect(Collectors.joining());
-        return Jwts.builder().setSubject(authentication.getName()).claim("roles", authororities)
-            .setExpiration(new Date(System.currentTimeMillis() + jwtExpirationInMs))
+        UserPrinciple userPrincipal = (UserPrinciple) authentication.getPrincipal();
+        return Jwts.builder().setSubject((userPrincipal.getUsername())).setIssuedAt(new Date())
+            .setExpiration(new Date((new Date()).getTime() + jwtExpiration * 1000))
             .signWith(SignatureAlgorithm.HS512, jwtSecret).compact();
     }
 
-    public Authentication getAuthentication(HttpServletRequest request)
+    public boolean validateJwtToken(String authToken)
     {
-        String token = resolveToken(request);
-        if (token == null)
+        try
         {
-            return null;
+            Jwts.parser().setSigningKey(jwtSecret).parseClaimsJws(authToken);
+            return true;
         }
-        Claims claim = Jwts.parser().setSigningKey(jwtSecret).parseClaimsJws(token).getBody();
-        String username = claim.getSubject();
-        List<GrantedAuthority> authorities = Arrays.stream(claim.get("roles").toString().split(","))
-            .map(role -> role.startsWith("ROLE_") ? role : "ROLE_" + role)
-            .map(SimpleGrantedAuthority::new).collect(Collectors.toList());
-        return username != null
-                        ? new UsernamePasswordAuthenticationToken(username, null, authorities)
-                        : null;
+        catch (SignatureException e)
+        {
+            logger.error("Invalid JWT signature -> Message: {} ", e);
+        }
+        catch (MalformedJwtException e)
+        {
+            logger.error("Invalid JWT token -> Message: {}", e);
+        }
+        catch (ExpiredJwtException e)
+        {
+            logger.error("Expired JWT token -> Message: {}", e);
+        }
+        catch (UnsupportedJwtException e)
+        {
+            logger.error("Unsupported JWT token -> Message: {}", e);
+        }
+        catch (IllegalArgumentException e)
+        {
+            logger.error("JWT claims string is empty -> Message: {}", e);
+        }
+        return false;
     }
 
-    public boolean validateToken(HttpServletRequest request)
+    public String getUserNameFromJwtToken(String token)
     {
-        String token = resolveToken(request);
-        if (token == null)
-        {
-            return false;
-        }
-        Claims claim = Jwts.parser().setSigningKey(jwtSecret).parseClaimsJws(token).getBody();
-        if (claim.getExpiration().before(new Date()))
-        {
-            return false;
-        }
-        return true;
-    }
-
-    private String resolveToken(HttpServletRequest request)
-    {
-        String bearerToken = request.getHeader(jwtHeaderString);
-        if (bearerToken != null && bearerToken.startsWith(jwtTokenPrefix))
-        {
-            return bearerToken.substring(7, bearerToken.length());
-        }
-        return null;
+        return Jwts.parser().setSigningKey(jwtSecret).parseClaimsJws(token).getBody().getSubject();
     }
 }
